@@ -70,14 +70,14 @@ void testUKFTankInitialize() {
     Matrix Q(TankModel.getStateSize(), TankModel.getStateSize());
     for (unsigned int i = 0; i < TankModel.getStateSize(); i++) {
         // Fill in diagonal
-        Q[i][i] = 1e-5;
+        Q.at(i, i) = 1e-5;
     }
 
     // Set up R
     Matrix R(TankModel.getOutputSize(), TankModel.getOutputSize());
     for (unsigned int i = 0; i < TankModel.getOutputSize(); i++) {
         // Fill in diagonal
-        R[i][i] = 1e-2;
+        R.at(i, i) = 1e-2;
     }
 
     // Create a UKF
@@ -143,14 +143,14 @@ void testUKFTankStep() {
     Matrix Q(TankModel.getStateSize(), TankModel.getStateSize());
     for (unsigned int i = 0; i < TankModel.getStateSize(); i++) {
         // Fill in diagonal
-        Q[i][i] = 1e-5;
+        Q.at(i, i) = 1e-5;
     }
 
     // Set up R
     Matrix R(TankModel.getOutputSize(), TankModel.getOutputSize());
     for (unsigned int i = 0; i < TankModel.getOutputSize(); i++) {
         // Fill in diagonal
-        R[i][i] = 1e-2;
+        R.at(i, i) = 1e-2;
     }
 
     // Create a UKF
@@ -225,14 +225,14 @@ void testUKFTankGetInputs() {
     Matrix Q(TankModel.getStateSize(), TankModel.getStateSize());
     for (unsigned int i = 0; i < TankModel.getStateSize(); i++) {
         // Fill in diagonal
-        Q[i][i] = 1e-5;
+        Q.at(i, i) = 1e-5;
     }
 
     // Set up R
     Matrix R(TankModel.getOutputSize(), TankModel.getOutputSize());
     for (unsigned int i = 0; i < TankModel.getOutputSize(); i++) {
         // Fill in diagonal
-        R[i][i] = 1e-2;
+        R.at(i, i) = 1e-2;
     }
 
     // Create a UKF
@@ -271,14 +271,14 @@ void testUKFBatteryInitialize() {
     Matrix Q(battery.getStateSize(), battery.getStateSize());
     for (unsigned int i = 0; i < battery.getStateSize(); i++) {
         // Fill in diagonal
-        Q[i][i] = 1e-10;
+        Q.at(i, i) = 1e-10;
     }
 
     // Set up R
     Matrix R(battery.getOutputSize(), battery.getOutputSize());
     for (unsigned int i = 0; i < battery.getOutputSize(); i++) {
         // Fill in diagonal
-        R[i][i] = 1e-2;
+        R.at(i, i) = 1e-2;
     }
 
     // Create a UKF
@@ -308,14 +308,14 @@ void testUKFBatteryStep() {
     Matrix Q(battery.getStateSize(), battery.getStateSize());
     for (unsigned int i = 0; i < battery.getStateSize(); i++) {
         // Fill in diagonal
-        Q[i][i] = 1e-10;
+        Q.at(i, i) = 1e-10;
     }
 
     // Set up R
     Matrix R(battery.getOutputSize(), battery.getOutputSize());
     for (unsigned int i = 0; i < battery.getOutputSize(); i++) {
         // Fill in diagonal
-        R[i][i] = 1e-2;
+        R.at(i, i) = 1e-2;
     }
 
     // Create a UKF
