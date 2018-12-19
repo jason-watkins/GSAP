@@ -4,6 +4,7 @@
 #ifndef PCOE_LOCK_H
 #define PCOE_LOCK_H
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 
