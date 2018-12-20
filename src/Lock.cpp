@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 United States Government as represented by the
+// Copyright (c) 2018 United States Government as represented by the
 // Administrator of the National Aeronautics and Space Administration.
 // All Rights Reserved.
 #include "Lock.h"
@@ -14,15 +14,6 @@ namespace {
         ThreadData* prev;
     };
 
-    thread_local std::unique_ptr<ThreadData> thread_data;
-    thread_local std::once_flag init_flag;
-
-    ThreadData* get_thread_data() {
-        std::call_once(init_flag,
-                       []() { thread_data = std::unique_ptr<ThreadData>(new ThreadData()); });
-        return thread_data.get();
-    }
-
     const std::memory_order mem_acq = std::memory_order_acquire;
     const std::memory_order mem_rel = std::memory_order_release;
     const std::memory_order mem_acq_rel = std::memory_order_acq_rel;
@@ -30,7 +21,7 @@ namespace {
     /**
      * Trys to aquire a lock by atomically setting a bit that was not previously
      * set in an atomic variable. Continues trying in a loop until succesful,
-     * yielding before each iteration.
+     * yielding after each failed iteration.
      *
      * @param state    The atomic variable that holds the lock bit
      * @param lock_bit The bit field representing the lock within the state.
@@ -40,7 +31,6 @@ namespace {
     T spin_aquire(std::atomic<T>& state, T lock_bit) noexcept {
         T value;
         for (;;) {
-            std::this_thread::yield();
             value = state.load();
 
             if (!(value & lock_bit)) {
@@ -53,17 +43,29 @@ namespace {
                     return value;
                 }
                 else {
+                    // Either state changed or we failed spuriously. Either way,
+                    // try again right away.
                     continue;
                 }
             }
             else {
                 // Someone else already has the lock; we need to wait for them
-                // to finish.
+                // to release it.
+                std::this_thread::yield();
                 continue;
             }
         }
     }
 
+    /**
+     * Trys to aquire a lock by atomically setting a bit that was not previously
+     * set in an atomic variable.
+     *
+     * @param state    The atomic variable to attempt to modify.
+     * @param value    The current expected value of {@p state}.
+     * @param lock_bit The bit to attempt to set.
+     * @return         true if the lock was aquired; otherwise, false.
+     **/
     template <typename T>
     inline bool try_lock_once(std::atomic<T>& state, T value, T lock_bit) noexcept {
         if (!(value & lock_bit)) {
@@ -146,6 +148,11 @@ namespace {
         return head;
     }
 
+    /**
+     * Remove and return the front of the queue pointed to by {@p head}. Set
+     * {@p head} to either the next item in the queue, or null if the queue held
+     * only one item. If the queue was already empty, returns null.
+     **/
     ThreadData* pop_front(ThreadData*& head) noexcept {
         if (!head) {
             return nullptr;
@@ -193,11 +200,14 @@ namespace PCOE {
                 continue;
             }
 
+            // Allocate resources needed to yield to an OS mutex.
+            ThreadData thread_data;
+
             // By now, we've given up spinning and we've aquired the queue lock,
             // so we can freely manipulate the wait queue. Get the queue and put
             // our thread in it, then wait for our thread to be woken up.
             ThreadData* head = reinterpret_cast<ThreadData*>(value & queue_mask);
-            ThreadData* new_head = insert_into_queue(head, get_thread_data());
+            ThreadData* new_head = insert_into_queue(head, &thread_data);
             if (head != new_head) {
                 // Head was modified. Need to store the result.
                 state_type new_state = reinterpret_cast<state_type>(&head);
@@ -214,12 +224,11 @@ namespace PCOE {
             // lock and wait to be woken up. Each time we're woken up, check to
             // see if we're still waiting. If so, the wakeup was spurious and we
             // need to wait again.
-            ThreadData* this_thread_data = get_thread_data();
-            std::unique_lock<std::mutex> lock(this_thread_data->mutex);
-            this_thread_data->waiting = true;
+            std::unique_lock<std::mutex> lock(thread_data.mutex);
+            thread_data.waiting = true;
             state.fetch_sub(queue_locked_bit, mem_rel);
-            while (this_thread_data->waiting) {
-                this_thread_data->condition.wait(lock);
+            while (thread_data.waiting) {
+                thread_data.condition.wait(lock);
             }
         }
     }
@@ -250,14 +259,17 @@ namespace PCOE {
             // operation locks the thread mutex while still holding the queue
             // lock just like us, there is no risk of a deadlock due to
             // ordering.
-            std::unique_lock<std::mutex> lock(head->mutex);
-            result->waiting = false;
-            lock.unlock();
-            result->condition.notify_one();
-
+            std::lock_guard<std::mutex> lock(head->mutex);
             // Set the new head and release the main and queue locks
             // simultaneously.
             state.store(new_head, mem_rel);
+
+            result->waiting = false;
+            result->condition.notify_one();
+            // Note (JW): We have to hold lock all the way to here. If we don't,
+            // a spurious wakeup between the previous two statements could cause
+            // the waiting thread to destroy the condition variable before we
+            // call notify.
         }
         else {
             // The fast path must have failed spuriously, becasue no one is
@@ -301,6 +313,9 @@ namespace PCOE {
                 std::this_thread::yield();
                 continue;
             }
+
+            // Allocate resources needed to yield to an OS mutex.
+            ThreadData thread_data;
 
             // By now, we've given up spinning and we've aquired the queue lock,
             // so we can freely manipulate the wait queue. Get the queue and put
@@ -423,14 +438,15 @@ namespace PCOE {
             // waiting, we need to briefly lock its mutex. Since the lock
             // operation locks the thread mutex while still holding the queue
             // mutex just like us, there is no risk of a deadlock due to
-            // ordering. Once we've changed the waiting thread's status, we drop
-            // all of the locks before notifying the waiting thread so that it
-            // doesn't have to wait on us after we wake it up.
-            std::unique_lock<std::mutex> lock(head->mutex);
-            head->waiting = false;
-            lock.unlock();
+            // ordering.
+            std::lock_guard<std::mutex> lock(head->mutex);
             state.fetch_sub(locked_bit | queue_locked_bit, mem_rel);
+            head->waiting = false;
             head->condition.notify_one();
+            // Note (JW): We have to hold lock all the way to here. If we don't,
+            // a spurious wakeup between the previous two statements could cause
+            // the waiting thread to destroy the condition variable before we
+            // call notify.
         }
         else {
             // The fast path must have failed spuriously, becasue no one is
@@ -485,6 +501,9 @@ namespace PCOE {
                 std::this_thread::yield();
                 continue;
             }
+
+            // Allocate resources needed to yield to an OS mutex.
+            ThreadData thread_data;
 
             // By now, we've given up spinning and we've got the state lock, so
             // we can freely manipulate the wait queue. Get the queue and put
@@ -590,14 +609,15 @@ namespace PCOE {
             // waiting, we need to briefly lock its mutex. Since the lock
             // operation locks the thread mutex while still holding the state
             // lock just like us, there is no risk of a deadlock due to
-            // ordering. Once we've changed the waiting thread's status, we drop
-            // all of the locks before notifying the waiting thread so that it
-            // doesn't have to wait on us after we wake it up.
-            std::unique_lock<std::mutex> lock(head->mutex);
-            head->waiting = false;
-            lock.unlock();
+            // ordering.
+            std::lock_guard<std::mutex> lock(head->mutex);
             state.store(0, mem_rel);
+            head->waiting = false;
             head->condition.notify_one();
+            // Note (JW): We have to hold lock all the way to here. If we don't,
+            // a spurious wakeup between the previous two statements could cause
+            // the waiting thread to destroy the condition variable before we
+            // call notify.
         }
         else {
             // The fast path must have failed spuriously, becasue no one is
