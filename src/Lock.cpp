@@ -3,6 +3,8 @@
 // All Rights Reserved.
 #include "Lock.h"
 
+#include <memory>
+
 namespace {
     struct ThreadData {
         bool waiting = false;
@@ -12,7 +14,14 @@ namespace {
         ThreadData* prev;
     };
 
-    thread_local ThreadData thread_data;
+    thread_local std::unique_ptr<ThreadData> thread_data;
+    thread_local std::once_flag init_flag;
+
+    ThreadData* get_thread_data() {
+        std::call_once(init_flag,
+                       []() { thread_data = std::unique_ptr<ThreadData>(new ThreadData()); });
+        return thread_data.get();
+    }
 
     const std::memory_order mem_acq = std::memory_order_acquire;
     const std::memory_order mem_rel = std::memory_order_release;
@@ -28,7 +37,7 @@ namespace {
      * @return         The value just before the lock bit was succesfully set.
      **/
     template <typename T>
-    T spin_aquire(std::atomic<T>& state, T lock_bit) {
+    T spin_aquire(std::atomic<T>& state, T lock_bit) noexcept {
         T value;
         for (;;) {
             std::this_thread::yield();
@@ -188,7 +197,7 @@ namespace PCOE {
             // so we can freely manipulate the wait queue. Get the queue and put
             // our thread in it, then wait for our thread to be woken up.
             ThreadData* head = reinterpret_cast<ThreadData*>(value & queue_mask);
-            ThreadData* new_head = insert_into_queue(head, &thread_data);
+            ThreadData* new_head = insert_into_queue(head, get_thread_data());
             if (head != new_head) {
                 // Head was modified. Need to store the result.
                 state_type new_state = reinterpret_cast<state_type>(&head);
@@ -205,11 +214,12 @@ namespace PCOE {
             // lock and wait to be woken up. Each time we're woken up, check to
             // see if we're still waiting. If so, the wakeup was spurious and we
             // need to wait again.
-            std::unique_lock<std::mutex> lock(thread_data.mutex);
-            thread_data.waiting = true;
+            ThreadData* this_thread_data = get_thread_data();
+            std::unique_lock<std::mutex> lock(this_thread_data->mutex);
+            this_thread_data->waiting = true;
             state.fetch_sub(queue_locked_bit, mem_rel);
-            while (thread_data.waiting) {
-                thread_data.condition.wait(lock);
+            while (this_thread_data->waiting) {
+                this_thread_data->condition.wait(lock);
             }
         }
     }
