@@ -28,11 +28,9 @@ namespace PCOE {
      * time, the classes provided by this module allocate one OS mutex per
      * thread, rather than one per lock. This strategy keeps each individual
      * lock as small as possible (a single pointer size), while introducing
-     * minimal overhead for each aditional thread. Each thread has thread-local
-     * storage for a single pointer allocated when the thread is created. If the
-     * thread ever tries to aquire a lock and is forced onto the slow path, An
-     * aditional struct will be allocated with an OS mutex and related
-     * bookkeeping memory for the thread.
+     * minimal overhead for each aditional thread. Each thread temporarily
+     * allocates a new OS mutex and associated bookkeeping data on the stack
+     * when it needs to defer to the OS to wait for the lock.
      *
      * @remarks
      * This class satisfies the {@code Mutex} named requirement.
@@ -169,11 +167,9 @@ namespace PCOE {
      * time, the classes provided by this module allocate one OS mutex per
      * thread, rather than one per lock. This strategy keeps each individual
      * lock as small as possible (a single pointer size), while introducing
-     * minimal overhead for each aditional thread. Each thread has thread-local
-     * storage for a single pointer allocated when the thread is created. If the
-     * thread ever tries to aquire a lock and is forced onto the slow path, An
-     * aditional struct will be allocated with an OS mutex and related
-     * bookkeeping memory for the thread.
+     * minimal overhead for each aditional thread. Each thread temporarily
+     * allocates a new OS mutex and associated bookkeeping data on the stack
+     * when it needs to defer to the OS to wait for the lock.
      *
      * @remarks
      * This class satisfies the {@code TimedMutex} named requirement.
@@ -353,22 +349,20 @@ namespace PCOE {
      * A recursive lock has to do substantially more bookkeeping that a
      * non-recursive lock. In the case where a thread already owns the lock and
      * is entering or leaving recursively, locks and unlocks amount to an atomic
-     * load and an atomic fetch/add each. In the case where a thread is
-     * aquiring an uncontested lock for the first time, the thread must perform
-     * several atomic operations. All other cases will fall back to the "slow"
-     * path, where the thread will spin several times waiting for the lock to
-     * become available, and finally fall back to waiting on an OS mutex.
+     * load and an atomic fetch/add each. In the case where a thread is aquiring
+     * an uncontested lock for the first time, the thread must perform several
+     * atomic operations. All other cases will fall back to the "slow" path,
+     * where the thread will spin several times waiting for the lock to become
+     * available, and finally fall back to waiting on an OS mutex.
      *
      * @remarks
      * Since any given thread can only be waiting on a single lock at any given
      * time, the classes provided by this module allocate one OS mutex per
      * thread, rather than one per lock. This strategy keeps each individual
-     * lock as small as possible (a single pointer size), while introducing
-     * minimal overhead for each aditional thread. Each thread has thread-local
-     * storage for a single pointer allocated when the thread is created. If the
-     * thread ever tries to aquire a lock and is forced onto the slow path, An
-     * aditional struct will be allocated with an OS mutex and related
-     * bookkeeping memory for the thread.
+     * lock as small as possible, while introducing minimal overhead for each
+     * aditional thread. Each thread temporarily allocates a new OS mutex and
+     * associated bookkeeping data on the stack when it needs to defer to the OS
+     * to wait for the lock.
      *
      * @remarks
      * This class satisfies the {@code TimedMutex} named requirement.
